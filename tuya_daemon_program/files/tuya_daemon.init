@@ -1,0 +1,43 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+start_service() {
+    local enabled did sec pid
+
+    config_load 'tuya_daemon'
+
+	load_cert() {
+        config_get enabled "$1" enable "1"
+		config_get pid "$1" product_id
+		config_get did "$1" device_id
+		config_get sec "$1" device_secret
+        echo "enabled: $enabled, pid: $pid, did: $did, sec: $sec"
+	}
+	config_foreach load_cert tuya_daemon
+
+    [ "$enabled" = "1" ] || return
+
+    logger "tuya_daemon: starting..."
+
+    procd_open_instance
+
+    procd_set_param command /bin/sh -c "/usr/bin/tuya_daemon -p $pid -d $did -s $sec"
+
+    procd_set_param respawn
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+
+    procd_close_instance
+}
+
+service_triggers() {
+	procd_add_reload_trigger "tuya_daemon"
+}
+
+reload_service() {
+	stop
+	start
+}

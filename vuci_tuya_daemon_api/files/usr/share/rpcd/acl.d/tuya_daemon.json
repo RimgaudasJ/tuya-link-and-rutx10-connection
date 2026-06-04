@@ -1,0 +1,15 @@
+{
+  "services/tuya_daemon": {
+    "description": "Tuya Daemon App permissions",
+    "read": {
+      "api": [
+        "/tuya_daemon/*"
+      ]
+    },
+    "write": {
+      "api": [
+        "/tuya_daemon/*"
+      ]
+    }
+  }
+}
