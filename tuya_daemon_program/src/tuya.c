@@ -5,8 +5,9 @@
 #include "tuya_link/tuyalink_core.h"
 #include <stdio.h>
 #include <syslog.h>
-#include "msg_log.h"
+#include "message_handler.h"
 #include<unistd.h>
+#include <stdlib.h>
 
 #define TUYA_ACTION_BUFFER_SIZE 512
 
@@ -40,9 +41,16 @@ static void on_messages(tuya_mqtt_context_t *context,
            "Received message: topic=%s, data=%s",
            msg->device_id ? msg->device_id : "",
            msg->data_string ? msg->data_string : "");
-
+    
+    char *json_response = NULL;
     if (msg->data_string)
-        log_message(msg->data_string, "tuya_action");
+        handle_message(msg->data_string, &json_response);
+
+    if (!json_response) {
+        json_response = strdup("{}");
+    }
+    tuya_report(context, json_response);
+    free(json_response);
 }
 
 int tuya_init(tuya_mqtt_context_t *client,

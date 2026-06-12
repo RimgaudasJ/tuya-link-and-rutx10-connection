@@ -9,7 +9,7 @@ CFLAGS += -Wall -Wextra -std=gnu99 -Werror -D_GNU_SOURCE
 
 TUYA_LIBS := -llink_core -lplatform_port -lutils_modules -lmiddleware_implementation
 
-LDLIBS += $(TUYA_LIBS) -lcjson -lubus -lubox -luci -largp
+LDLIBS += $(TUYA_LIBS) -lubus -lblobmsg_json -lubox -luci -largp -ljson-c -lm 
 
 TARGET := tuya_daemon
 SOURCES := $(wildcard $(SRC_DIR)/*.c)

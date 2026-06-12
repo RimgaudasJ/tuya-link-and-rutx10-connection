@@ -10,7 +10,7 @@
 #define UBUS_STATUS_PARSE_ERROR UBUS_STATUS_INVALID_ARGUMENT
 #endif
 
-
+#define RETRY_COUNT 5
 
 int setup_serial(struct sp_port **port) {
     if (!port) {
@@ -42,13 +42,16 @@ int get_device_json(char** return_json) {
         if (sp_get_port_usb_vid_pid(ports[i], &vid, &pid) != SP_OK) {
             continue;
         }
-        struct blob_attr *device = blobmsg_open_table(&bbuf, NULL);
         if (port_name) {
-            blobmsg_add_string(&bbuf, "port", port_name);
+            char device_str[128];
+
+            snprintf(device_str, sizeof(device_str),
+                    "port:%s, vid:%d, pid:%d",
+                    port_name, vid, pid);
+
+            blobmsg_add_string(&bbuf, NULL, device_str);
         }
-        blobmsg_add_u32(&bbuf, "vid", vid);
-        blobmsg_add_u32(&bbuf, "pid", pid);
-        blobmsg_close_table(&bbuf, device);
+
     }
     blobmsg_close_array(&bbuf, devices);
     char* json = blobmsg_format_json_with_cb(bbuf.head, true, NULL, NULL, 0);
@@ -72,7 +75,7 @@ int get_device_json(char** return_json) {
     return UBUS_STATUS_OK;
 }
 
-int read_data_from_port(struct sp_port *port, char** reply_json) {
+int read_data_from_port(struct sp_port *port, char** reply_json, int *got_reply) {
     if (!port) {
         return UBUS_STATUS_INVALID_ARGUMENT;
     }
@@ -83,6 +86,7 @@ int read_data_from_port(struct sp_port *port, char** reply_json) {
     bytes_read = sp_blocking_read(port, buf, sizeof(buf) - 1, 2000);
 
     if (bytes_read > 0) {
+        *got_reply = 1;
         buf[bytes_read] = '\0';
         if (reply_json) {
             *reply_json = strdup(buf);
@@ -96,6 +100,7 @@ int read_data_from_port(struct sp_port *port, char** reply_json) {
     if (bytes_read < 0) {
         return UBUS_STATUS_UNKNOWN_ERROR;
     }
+    
     return UBUS_STATUS_OK;
 }
 
@@ -109,8 +114,7 @@ int send_data_to_port(struct sp_port *port, const char* data) {
 
     if (bytes_written < 0 || (size_t)bytes_written != data_len) {
         return UBUS_STATUS_UNKNOWN_ERROR;
-    }
-
+    } 
     return UBUS_STATUS_OK;
 }
 
@@ -134,15 +138,22 @@ int send_and_get_reply(const char* port_name, const char* data, char** reply) {
     if (setup_serial(&port) != UBUS_STATUS_OK) {
         goto cleanup;
     }
+    
+    int got_reply = 0;
+    for (int attempt = 0; attempt < RETRY_COUNT; attempt++) {
+        if (send_data_to_port(port, data) != UBUS_STATUS_OK) {
+            goto cleanup;
+        }
 
-    if (send_data_to_port(port, data) != UBUS_STATUS_OK) {
-        goto cleanup;
+        if (read_data_from_port(port, reply, &got_reply) != UBUS_STATUS_OK) {
+            goto cleanup;
+        }
+        if (got_reply) {
+            break;
+        }
+        sleep(1);
     }
-
-    if (read_data_from_port(port, reply) != UBUS_STATUS_OK) {
-        goto cleanup;
-    }
-    ret = UBUS_STATUS_OK;
+    ret = got_reply ? UBUS_STATUS_OK : UBUS_STATUS_UNKNOWN_ERROR;
 
 cleanup:
     if (port) {

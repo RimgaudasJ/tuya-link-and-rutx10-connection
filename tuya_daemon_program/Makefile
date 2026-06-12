@@ -3,15 +3,13 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=tuya_daemon
 PKG_RELEASE:=1
 PKG_VERSION:=1.0.0
-PKG_BUILD_DEPENDS:=cJSON libtuya_link libubus libubox libuci 
-PKG_DEPENDS:=+cJSON +libtuya_link +libubus +libubox  +libuci 
 
 include $(INCLUDE_DIR)/package.mk
 
 define Package/tuya_daemon
 	CATEGORY:=Base system
 	TITLE:=tuya_daemon
-	DEPENDS:= +cJSON +libtuya_link +libubus +libubox +libuci 
+	DEPENDS:= +libtuya_link +libubus +libblobmsg-json +libubox +libjson-c +libuci
 endef
 
 define Package/tuya_daemon/description

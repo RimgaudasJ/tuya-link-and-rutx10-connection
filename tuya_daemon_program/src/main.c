@@ -8,15 +8,13 @@
 #include <time.h>
 #include <argp.h>
 #include <signal.h>
+#include <libubus.h>
+#include <libubox/blobmsg_json.h>
 
 
-#include "daemon.h"
-#include "hardware.h"
-#include "network.h"
-#include "cpu.h"
 #include "tuya.h"
-#include "json_builder.h"
 #include "option_parse.h"
+#include "ubus_handler.h"
 
 #define REPORT_INTERVAL_SEC 5
 
@@ -26,6 +24,12 @@ static struct argp argp = { options, parse_opt, args_doc, doc, NULL, NULL, NULL 
 
 static void handle_signal(int sig);
 volatile sig_atomic_t stop = 0;
+
+static struct uloop_timeout mqtt_timer;
+static tuya_mqtt_context_t client;
+
+
+static void mqtt_loop_cb(struct uloop_timeout *t);
 
 int main(int argc, char **argv)
 {
@@ -57,10 +61,17 @@ int main(int argc, char **argv)
         goto cleanup_log;
     }
 
+    // Connect to ubus
+    struct ubus_context *ctx;
+    if (ubus_init_connection(&ctx) != 0) {
+        syslog(LOG_ERR, "Failed to initialize ubus");
+        rc = EXIT_FAILURE;
+        goto cleanup_log;
+    }
+
     // Argument parsing and initialization
     struct arguments args;
-    tuya_mqtt_context_t client;
-    char json_buf[JSON_BUF];
+
 
     memset(&args, 0, sizeof(args));
     argp_parse(&argp, argc, argv, 0, NULL, &args);
@@ -69,47 +80,25 @@ int main(int argc, char **argv)
     syslog(LOG_INFO, "Starting with device_id=%s product_id=%s",
            args.device_id, args.product_id);
 
-    if (args.daemon_flag) {
-        if (create_daemon() != 0) {
-            syslog(LOG_ERR, "Failed to create daemon process");
-            rc = EXIT_FAILURE;
-            goto cleanup_log;
-        }
-        syslog(LOG_INFO, "Running as daemon");
-    }
-
     if (tuya_init(&client, args.device_id, args.device_secret) != 0) {
-        syslog(LOG_ERR, "Failed to initialize Tuya MQTT");
+        syslog(LOG_ERR, "Failed to initialize Tuya MQTT"); 
         rc = EXIT_FAILURE;
-        goto cleanup_tuya;
+        goto cleanup_ubus;
     }
 
-    syslog(LOG_INFO, "Tuya MQTT initialized, entering report loop");
-
-    for (; stop!=1;) {
-        int elapsed;
-        /* Drive MQTT for REPORT_INTERVAL_SEC seconds */
-        for (elapsed = 0; elapsed < REPORT_INTERVAL_SEC; elapsed++) {
-            tuya_mqtt_loop(&client);
-            sleep(1);
-        }
-
-        if (build_json(json_buf, sizeof(json_buf)) == 0) {
-            syslog(LOG_INFO, "Reporting metrics payload");
-            int report_rc = tuya_report(&client, json_buf);
-            if (report_rc != 0)
-                syslog(LOG_ERR, "tuya_report returned %d (may still succeed)", report_rc);
-            else
-                syslog(LOG_INFO, "Metrics reported successfully");
-        } else {
-            syslog(LOG_ERR, "Failed to build metrics JSON");
-        }
-    }
-
+    mqtt_timer.cb = mqtt_loop_cb;
+    uloop_timeout_set(&mqtt_timer, 100);
+    uloop_init();
+    ubus_add_uloop(ctx);
+    uloop_run();
+    tuya_mqtt_loop(&client);
+    uloop_done();
     //cleanups
-cleanup_tuya:
     tuya_mqtt_disconnect(&client);
     tuya_mqtt_deinit(&client);
+    
+cleanup_ubus:
+    ubus_free(ctx);
 cleanup_log:
     closelog();
     return rc;
@@ -117,5 +106,13 @@ cleanup_log:
 
 static void handle_signal(int sig) {
     syslog(LOG_INFO, "Received signal %d, exiting", sig);
-    stop = 1;
+    uloop_end();
+}
+
+static void mqtt_loop_cb(struct uloop_timeout *t)
+{
+    tuya_mqtt_loop(&client);
+
+    // reschedule every 100 ms
+    uloop_timeout_set(t, 100);
 }
